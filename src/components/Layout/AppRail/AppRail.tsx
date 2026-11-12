@@ -26,6 +26,7 @@ import { useSpaceAttention } from '@/hooks/useSpaceAttention';
 import { useOpenSpaceHomeTab, useSpaceSwitch } from '@/hooks/useSpaceSwitch';
 import { SESSION_WINDOW_ROUTE } from '@/lib/sessionWindows';
 import { isHomePagePath, isSettingsPagePath } from '@/lib/shellRoutes';
+import { spaceEmoji } from '@/lib/spaceEmoji';
 import { getActiveSpaceTriggerLabel } from '@/lib/spaceLabel';
 import { APP_COMMAND, PINNED_SPACE_COMMANDS } from '@/shared/appCommands';
 import { usePageTabStore, type ShellPlace } from '@/store/pageTabStore';
@@ -33,7 +34,7 @@ import { openSettings } from '@/store/settingsStore';
 import { useSpaceStore } from '@/store/spaceStore';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { House, Settings } from 'lucide-react';
-import { useCallback, useState } from 'react';
+import { memo, useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { matchPath, useLocation } from 'react-router-dom';
 import { AppRailButton } from './AppRailButton';
@@ -78,7 +79,7 @@ export function getAppRailPlace(
  * Settings, and the account menu. It sits on the same chrome surface as the
  * top bar and stays when the page sidebar folds.
  */
-export default function AppRail() {
+function AppRail() {
   const { t } = useTranslation();
   const location = useLocation();
   const executeAppCommand = useAppCommand();
@@ -126,6 +127,7 @@ export default function AppRail() {
       >
         <SpaceRailTile
           name={getActiveSpaceTriggerLabel(space.name, t)}
+          emoji={spaceEmoji(space)}
           pinned={pinned}
           selected={place === 'space' && spaceId === activeSpaceId}
           attention={attention[spaceId]}
@@ -189,7 +191,7 @@ export default function AppRail() {
 
       <span
         aria-hidden
-        className="my-ds-2 w-ds-24 shrink-0 border-x-0 border-t-[0.5px] border-b-0 border-solid border-ds-hairline-subtle-default"
+        className="my-ds-2 w-ds-24 shrink-0 border-x-0 border-y-0 border-t-ds-hairline border-solid border-ds-hairline-subtle-default"
       />
 
       {/* Ten pins and the active tile fit at the minimum window height; a
@@ -224,3 +226,5 @@ export default function AppRail() {
     </nav>
   );
 }
+
+export default memo(AppRail);

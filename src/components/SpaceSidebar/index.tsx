@@ -13,8 +13,8 @@
 // ========= Copyright 2025-2026 @ Eigent.ai All Rights Reserved. =========
 
 import { isWeb } from '@/client/platform';
+import { SpaceHeaderMenu } from '@/components/Home/SpaceHeaderMenu';
 import { useAppCommand } from '@/components/Layout/AppCommandProvider';
-import { spaceRailTileInitial } from '@/components/Layout/AppRail/SpaceRailTile';
 import {
   NavTab,
   SidebarNavGroup,
@@ -22,9 +22,9 @@ import {
   SidebarSeparator,
   SidebarShell,
 } from '@/components/Layout/AppSidebar';
+import { SidebarRowTooltip } from '@/components/Layout/AppSidebar/SidebarTooltip';
 import { Button } from '@/components/ui/button';
 import { DsIcon } from '@/components/ui/ds-icon';
-import { DsText } from '@/components/ui/ds-text';
 import { ShortcutTooltipContent } from '@/components/ui/shortcut-tooltip';
 import { useSessionNavStatuses } from '@/hooks/useSessionNavStatuses';
 import {
@@ -37,20 +37,16 @@ import { ensureScratchSpaceWorkspaceBinding } from '@/lib/scratchSpaceWorkspace'
 import { resolveSessionNavLeadPresentation } from '@/lib/sessionNavLead';
 import { openSessionInShell, shouldListSession } from '@/lib/sessionOpen';
 import { openSessionWindow } from '@/lib/sessionWindows';
-import { isSettingsRoutePath, shellBackState } from '@/lib/shellRoutes';
 import {
-  getActiveSpaceTriggerLabel,
   getFilesTabBindingLabel,
   getSessionDisplayName,
   isUnboundUntitledSpace,
 } from '@/lib/spaceLabel';
 import { AUTOMATION_ICON, AUTOMATION_OFF_ICON } from '@/lib/triggerIcon';
 import { cn } from '@/lib/utils';
-import { runAfterWorkspaceConfigurationSave } from '@/lib/workspaceConfigurationNavigationGuard';
 import { APP_COMMAND } from '@/shared/appCommands';
 import { useAuthStore } from '@/store/authStore';
-import type { ChatStore } from '@/store/chatStore';
-import { usePageTabStore } from '@/store/pageTabStore';
+import { displayedWorkspaceTab, usePageTabStore } from '@/store/pageTabStore';
 import { useProjectRuntimeStore } from '@/store/projectRuntimeStore';
 import { useSessionControlsStore } from '@/store/sessionControlsStore';
 import {
@@ -58,16 +54,14 @@ import {
   useSessionSplitViewStore,
 } from '@/store/sessionSplitViewStore';
 import { useSessionWindowsStore } from '@/store/sessionWindowsStore';
-import { useSettingsStore } from '@/store/settingsStore';
 import {
   getVisibleProjectMetasForSpace,
   useSpaceStore,
 } from '@/store/spaceStore';
 import { useTriggerStore } from '@/store/triggerStore';
-import { Cast, Inbox, Plus, ToolCase } from 'lucide-react';
-import { useCallback, useEffect, useId, useMemo, useRef } from 'react';
+import { Cast, Inbox, Plus, Settings2 } from 'lucide-react';
+import { memo, useCallback, useEffect, useId, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useLocation, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { SessionControlDialogs } from './SessionControlDialogs';
 import { SessionNavList } from './SessionNavList';
@@ -79,19 +73,16 @@ import {
 const NO_PANES: string[] = [];
 
 export interface SpaceSidebarProps {
-  chatStore: ChatStore | null;
   className?: string;
 }
 
 let didAttemptBootSessionResume = false;
 
-export default function SpaceSidebar({
-  chatStore: _chatStore,
-  className,
-}: SpaceSidebarProps) {
+function SpaceSidebar({ className }: SpaceSidebarProps) {
   const executeAppCommand = useAppCommand();
   const filesTabDescriptionId = useId();
   const activeWorkspaceTab = usePageTabStore((s) => s.activeWorkspaceTab);
+  const spaceWorkspaceTab = usePageTabStore((s) => s.spaceWorkspaceTab);
   const setActiveWorkspaceTab = usePageTabStore((s) => s.setActiveWorkspaceTab);
   const requestOpenTriggerAddDialog = usePageTabStore(
     (s) => s.requestOpenTriggerAddDialog
@@ -103,14 +94,15 @@ export default function SpaceSidebar({
   const wsConnectionStatus = useTriggerStore((s) => s.wsConnectionStatus);
   const triggerReconnect = useTriggerStore((s) => s.triggerReconnect);
   const triggersListenerConnected = wsConnectionStatus === 'connected';
-  const projectStore = useProjectRuntimeStore();
+  const activeProjectId = useProjectRuntimeStore((s) => s.activeProjectId);
+  // Rows read each Session's chat store, so they refresh as Sessions load.
+  const loadedProjects = useProjectRuntimeStore((s) => s.projects);
   const navLeadByProjectId = useProjectRuntimeStore(
     (s) => s.navLeadByProjectId
   );
   const historyLoadingProjectIds = useProjectRuntimeStore(
     (s) => s.historyLoadingProjectIds
   );
-  const activeProjectId = projectStore.activeProjectId;
   const activeSpaceId = useSpaceStore((s) => s.activeSpaceId);
   const visiblePanes = useVisibleSessionPanes(activeSpaceId);
   const windowedProjectIds = useSessionWindowsStore((s) => s.openProjectIds);
@@ -124,9 +116,6 @@ export default function SpaceSidebar({
   const filesTabHasUnviewedFiles =
     !!activeProjectId && filesUnviewedForProjects.has(activeProjectId);
   const { t } = useTranslation();
-  const navigate = useNavigate();
-  const location = useLocation();
-  const closeSettings = useSettingsStore((state) => state.closeSettings);
   const pinnedProjectIds = useSessionControlsStore((s) => s.pinnedProjectIds);
   const togglePinned = useSessionControlsStore((s) => s.togglePinned);
   const refreshPinned = useSessionControlsStore((s) => s.refreshPinned);
@@ -177,16 +166,19 @@ export default function SpaceSidebar({
     userId,
   ]);
 
+  // The composer landing is drawn as New session.
+  const newSessionShown =
+    displayedWorkspaceTab(activeWorkspaceTab) === 'new-project';
   const isSessionNavSelectionActive =
-    activeWorkspaceTab === 'project' || activeWorkspaceTab === 'new-project';
+    activeWorkspaceTab === 'project' || newSessionShown;
 
   const ensureProjectLoaded = useCallback(
     (projectId: string, onHydrationStarted?: () => void) =>
-      ensureProjectRuntimeLoaded(projectStore, projectId, {
+      ensureProjectRuntimeLoaded(useProjectRuntimeStore.getState(), projectId, {
         onHydrationStarted,
         requireActiveSelection: true,
       }),
-    [projectStore]
+    []
   );
 
   const selectSession = useCallback(
@@ -317,7 +309,7 @@ export default function SpaceSidebar({
     didAttemptBootSessionResume = true;
 
     if (activeWorkspaceTab !== 'workforce') return;
-    if (projectStore.activeProjectId) return;
+    if (useProjectRuntimeStore.getState().activeProjectId) return;
     if (!activeSpaceId) return;
     const lastVisitedId =
       useSpaceStore.getState().lastVisitedProjectBySpace[activeSpaceId];
@@ -342,7 +334,9 @@ export default function SpaceSidebar({
           // `navLeadByProjectId` is kept live by `projectStore`'s chat-store
           // subscription registry — no need to peek into chat-store internals
           // here (those reads aren't tracked by React).
-          const projectChatStore = projectStore.peekActiveChatStore(project.id);
+          const projectChatStore = useProjectRuntimeStore
+            .getState()
+            .peekActiveChatStore(project.id);
           const projectChatState = projectChatStore?.getState();
           const activeTask = projectChatState?.activeTaskId
             ? projectChatState.tasks[projectChatState.activeTaskId]
@@ -372,13 +366,15 @@ export default function SpaceSidebar({
             splitViewUnavailableReason: splitViewUnavailableReason(project.id),
           };
         }),
+    // `loadedProjects` isn't read directly: rows read chat stores through it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       activeProjectId,
       historyLoadingProjectIds,
       navLeadByProjectId,
       pinnedProjectIds,
       projectMetasForActiveSpace,
-      projectStore,
+      loadedProjects,
       splitPanes,
       splitViewUnavailableReason,
       t,
@@ -386,45 +382,14 @@ export default function SpaceSidebar({
     ]
   );
 
-  const activeSpaceLabel = getActiveSpaceTriggerLabel(
-    activeSpaceId ? spacesById[activeSpaceId]?.name : undefined,
-    t
-  );
-
   const handleNewSession = useCallback(() => {
     executeAppCommand(APP_COMMAND.newProject);
   }, [executeAppCommand]);
 
-  const isConfigurationActive = useMemo(() => {
-    if (!activeSpaceId || !isSettingsRoutePath(location.pathname)) {
-      return false;
-    }
-    const searchParams = new URLSearchParams(location.search);
-    return (
-      searchParams.get('section') === 'spaces' &&
-      searchParams.get('spaceId') === activeSpaceId &&
-      searchParams.get('spaceTab') === 'workspace-profile'
-    );
-  }, [activeSpaceId, location.pathname, location.search]);
-
-  const openSpaceConfiguration = useCallback(() => {
-    if (!activeSpaceId) return;
-    void runAfterWorkspaceConfigurationSave(() => {
-      closeSettings();
-      navigate(
-        `/home?section=spaces&spaceId=${encodeURIComponent(activeSpaceId)}&spaceTab=workspace-profile`,
-        {
-          state: shellBackState(`${location.pathname}${location.search}`),
-        }
-      );
-    });
-  }, [
-    activeSpaceId,
-    closeSettings,
-    location.pathname,
-    location.search,
-    navigate,
-  ]);
+  const spaceSettingsLabel = t('layout.space-settings');
+  const isSpaceSettingsActive =
+    activeWorkspaceTab === 'space-workspace' &&
+    spaceWorkspaceTab === 'workspace-profile';
 
   const openFilesTab = useCallback(() => {
     let projectId = activeProjectId;
@@ -440,7 +405,7 @@ export default function SpaceSidebar({
             (project) => project.id === lastVisitedProjectId
           ) ?? projectsInSpace[0];
         projectId = targetProject.id;
-        projectStore.setActiveProject(projectId);
+        useProjectRuntimeStore.getState().setActiveProject(projectId);
       }
     }
 
@@ -449,6 +414,7 @@ export default function SpaceSidebar({
       return;
     }
 
+    const projectStore = useProjectRuntimeStore.getState();
     const projectChatStore = projectStore.peekActiveChatStore(projectId);
     const taskId = projectChatStore?.getState().activeTaskId;
     if (taskId) {
@@ -473,7 +439,6 @@ export default function SpaceSidebar({
     activeProjectId,
     activeSpaceId,
     ensureProjectLoaded,
-    projectStore,
     setActiveWorkspaceTab,
     t,
   ]);
@@ -519,36 +484,51 @@ export default function SpaceSidebar({
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-clip">
           <SidebarSection>
             <SidebarNavGroup>
-              {/* The Space itself: opens its Workspace page. */}
-              <NavTab
-                active={activeWorkspaceTab === 'space-workspace'}
-                onClick={() => setActiveWorkspaceTab('space-workspace')}
-                disabled={!activeSpaceId}
-                leading={
-                  <span
-                    aria-hidden
-                    data-space-sidebar-space-icon
-                    className="flex size-ds-icon-md shrink-0 items-center justify-center rounded-ds-4 bg-ds-neutral-muted-default text-ds-ink-default-default"
-                  >
-                    <DsText as="span" role="meta" weight="semibold">
-                      {spaceRailTileInitial(activeSpaceLabel)}
-                    </DsText>
-                  </span>
-                }
-                label={activeSpaceLabel}
-                tooltip={
-                  <ShortcutTooltipContent
-                    label={t('layout.workspace-tab')}
-                    shortcutId="navigate-workspace"
+              {/* The Space's name opens its menu; the button opens its
+                  settings on the Workspace page. */}
+              {activeSpaceId ? (
+                <div
+                  data-sidebar-row
+                  className="flex h-8 w-full min-w-0 items-center gap-ds-2"
+                >
+                  <SpaceHeaderMenu
+                    spaceId={activeSpaceId}
+                    appearance="sidebar"
                   />
-                }
-                tooltipCompact
-                tooltipVariant="delayed"
-                ariaLabel={`${activeSpaceLabel}, ${t('layout.workspace-tab')}`}
-                ariaCurrentPage={activeWorkspaceTab === 'space-workspace'}
-              />
+                  <SidebarRowTooltip
+                    content={
+                      <ShortcutTooltipContent
+                        label={spaceSettingsLabel}
+                        shortcutId="navigate-configuration"
+                      />
+                    }
+                    className="py-0"
+                    rowSelector="[data-sidebar-row]"
+                  >
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      buttonRadius="full"
+                      buttonContent="icon-only"
+                      aria-label={spaceSettingsLabel}
+                      aria-pressed={isSpaceSettingsActive}
+                      className="no-drag shrink-0"
+                      onClick={() =>
+                        executeAppCommand(APP_COMMAND.navigateConfiguration)
+                      }
+                    >
+                      <DsIcon
+                        icon={Settings2}
+                        className="text-ds-ink-muted-default"
+                        aria-hidden
+                      />
+                    </Button>
+                  </SidebarRowTooltip>
+                </div>
+              ) : null}
               <NavTab
-                active={activeWorkspaceTab === 'new-project'}
+                active={newSessionShown}
                 onClick={handleNewSession}
                 leading={
                   <DsIcon icon={Plus} className="shrink-0" aria-hidden />
@@ -563,7 +543,7 @@ export default function SpaceSidebar({
                 tooltipCompact
                 tooltipVariant="delayed"
                 ariaLabel={t('layout.new-project')}
-                ariaCurrentPage={activeWorkspaceTab === 'new-project'}
+                ariaCurrentPage={newSessionShown}
               />
               <NavTab
                 active={activeWorkspaceTab === 'files'}
@@ -695,25 +675,6 @@ export default function SpaceSidebar({
                 ariaLabel={t('layout.dispatch-tab')}
                 ariaCurrentPage={activeWorkspaceTab === 'dispatch'}
               />
-              <NavTab
-                active={isConfigurationActive}
-                onClick={openSpaceConfiguration}
-                disabled={!activeSpaceId}
-                leading={
-                  <DsIcon icon={ToolCase} className="shrink-0" aria-hidden />
-                }
-                label={t('layout.configuration-tab')}
-                tooltip={
-                  <ShortcutTooltipContent
-                    label={t('layout.configuration-tab')}
-                    shortcutId="navigate-configuration"
-                  />
-                }
-                tooltipCompact
-                tooltipVariant="delayed"
-                ariaLabel={t('layout.configuration-tab')}
-                ariaCurrentPage={isConfigurationActive}
-              />
             </SidebarNavGroup>
           </SidebarSection>
 
@@ -738,3 +699,5 @@ export default function SpaceSidebar({
     </>
   );
 }
+
+export default memo(SpaceSidebar);

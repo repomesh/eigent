@@ -18,23 +18,34 @@ import '@/api/http';
 
 import HomeSidebar from '@/components/Home/HomeSidebar';
 import { useHomeVisitStore } from '@/components/Home/homeVisit';
+import { presentationForKind } from '@/lib/sessionNavLead';
 import { usePageTabStore } from '@/store/pageTabStore';
 import { useProjectRuntimeStore } from '@/store/projectRuntimeStore';
+import { useSessionControlsStore } from '@/store/sessionControlsStore';
 import {
   pinnedSpaceOwnerKey,
   useSpaceStore,
   type Space,
   type SpaceProjectMeta,
 } from '@/store/spaceStore';
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
+  deleteSpaceAndSessions: vi.fn(),
   executeAppCommand: vi.fn(),
   switchToSpace: vi.fn(),
   openSessionInShell: vi.fn(),
+  openSessionWindow: vi.fn(),
   sessionAttention: {} as Record<string, 'running' | 'waiting'>,
   spaceAttention: {} as Record<string, { running: number; waiting: number }>,
 }));
@@ -57,11 +68,20 @@ vi.mock('@/hooks/useSpaceAttention', () => ({
   useSessionAttention: () => mocks.sessionAttention,
 }));
 
+vi.mock('@/lib/sessionWindows', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/sessionWindows')>()),
+  openSessionWindow: mocks.openSessionWindow,
+}));
+
 vi.mock('@/hooks/useSessionNavStatuses', () => ({
   useSessionNavStatuses: () => {},
 }));
 
 // The dialogs and Space creation have their own tests.
+vi.mock('@/lib/spaceDeletion', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/spaceDeletion')>()),
+  deleteSpaceAndSessions: mocks.deleteSpaceAndSessions,
+}));
 vi.mock('@/components/SpaceSidebar/SessionControlDialogs', () => ({
   SessionControlDialogs: () => null,
 }));
@@ -189,6 +209,12 @@ describe('HomeSidebar', () => {
     mocks.spaceAttention = {};
     mocks.switchToSpace.mockResolvedValue(true);
     mocks.openSessionInShell.mockResolvedValue(undefined);
+    mocks.openSessionWindow.mockResolvedValue(undefined);
+    useSessionControlsStore.setState({
+      pinnedProjectIds: [],
+      unreadProjectIds: [],
+      seenOutcomes: {},
+    });
     seedSpaces();
     useHomeVisitStore.setState({
       visit: 0,
@@ -203,10 +229,13 @@ describe('HomeSidebar', () => {
       shellPlace: 'home',
       activeWorkspaceTab: 'new-project',
       homeFoldedSpaceIds: [],
+      homeExpandedSpaceIds: [],
+      homeSpaceSort: 'updated',
+      homeSidebarGrouping: 'spaces',
     });
   });
 
-  it('starts with New session and All Spaces, and ends with New Space', async () => {
+  it('starts with New session and All Spaces, with New Space in the Spaces header', async () => {
     const user = userEvent.setup();
     renderSidebar();
 
@@ -225,15 +254,338 @@ describe('HomeSidebar', () => {
       '/home?section=spaces'
     );
 
-    await user.click(
-      within(sidebar()).getByRole('button', { name: 'New Space' })
-    );
+    const newSpace = within(sidebar()).getByRole('button', {
+      name: 'New Space',
+    });
+    expect(newSpace.closest('[data-section-header-actions]')).not.toBeNull();
+    await user.click(newSpace);
     expect(
       screen.getByRole('dialog', { name: 'Create a new Space' })
     ).toBeInTheDocument();
   });
 
-  it('lists every Space with four recent Sessions, a pin mark and Show all', async () => {
+  it('starts with the Eigent row, which is not a control', () => {
+    renderSidebar();
+
+    const brand = document.querySelector(
+      '[data-home-sidebar-brand]'
+    ) as HTMLElement;
+    expect(brand).toHaveTextContent('Eigent');
+    expect(within(brand).getByText('Eigent')).toHaveClass('font-display');
+    expect(brand).toHaveClass('h-8');
+    expect(brand.querySelector('img')).not.toBeNull();
+    expect(within(brand).queryByRole('button')).toBeNull();
+    // First in the sidebar, so New session lines up with the Space sidebar.
+    expect(
+      brand.compareDocumentPosition(
+        within(sidebar()).getByRole('button', { name: 'New session' })
+      ) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+  });
+
+  it('sorts Spaces by creation time from the Spaces header menu', async () => {
+    const user = userEvent.setup();
+    act(() => {
+      useSpaceStore.setState((state) => ({
+        spaces: {
+          ...state.spaces,
+          'space-research': { ...state.spaces['space-research'], createdAt: 1 },
+          'space-ops': { ...state.spaces['space-ops'], createdAt: 2 },
+        },
+      }));
+    });
+    renderSidebar();
+    expect(spaceNames()).toEqual(['space-research', 'space-ops']);
+
+    await user.click(
+      within(sidebar()).getByRole('button', { name: 'View options' })
+    );
+    (await screen.findByRole('menuitem', { name: 'Sort by' })).focus();
+    await user.keyboard('{ArrowRight}');
+    const updated = await screen.findByRole('menuitemradio', {
+      name: 'Updated time',
+    });
+    expect(updated).toHaveAttribute('aria-checked', 'true');
+    await user.keyboard('{ArrowDown}{Enter}');
+
+    expect(usePageTabStore.getState().homeSpaceSort).toBe('created');
+    expect(spaceNames()).toEqual(['space-ops', 'space-research']);
+  });
+
+  it('lists every Session in one list, each with its Space', async () => {
+    const user = userEvent.setup();
+    renderSidebar();
+
+    await user.click(
+      within(sidebar()).getByRole('button', { name: 'View options' })
+    );
+    (await screen.findByRole('menuitem', { name: 'Organize by' })).focus();
+    await user.keyboard('{ArrowRight}');
+    await screen.findByRole('menuitemradio', { name: 'One list' });
+    await user.keyboard('{ArrowDown}{Enter}');
+
+    expect(usePageTabStore.getState().homeSidebarGrouping).toBe('list');
+    expect(spaceNames()).toEqual([]);
+    expect(
+      within(sidebar()).getByRole('button', { name: 'Sessions' })
+    ).toBeInTheDocument();
+    // All five Research Sessions (no four-row cap) and Ops' one, newest first.
+    const rows = within(sidebar())
+      .getAllByRole('button', {
+        name: /Weekly report|Competitor scan|Pricing notes|Hiring plan|Old notes|Vendor invoices/,
+      })
+      .map((row) => row.textContent);
+    expect(rows).toHaveLength(6);
+    expect(rows[0]).toContain('Weekly report');
+    expect(rows[0]).toContain('Research');
+    expect(rows[5]).toContain('Vendor invoices');
+    expect(rows[5]).toContain('Ops');
+  });
+
+  const sessionRow = (name: string | RegExp) =>
+    within(sidebar())
+      .getByRole('button', { name })
+      .closest('.group\\/session-item') as HTMLElement;
+
+  it('shows only End session on a Session row, and ends the Session', async () => {
+    const user = userEvent.setup();
+    const requestAction = vi.fn();
+    useSessionControlsStore.setState({ requestAction });
+    renderSidebar();
+
+    const row = sessionRow('Weekly report');
+    const buttons = within(row)
+      .getAllByRole('button')
+      .map((button) => button.getAttribute('aria-label') ?? button.textContent);
+    expect(buttons).toEqual(['Weekly report', 'End session']);
+
+    await user.click(within(row).getByRole('button', { name: 'End session' }));
+    expect(requestAction).toHaveBeenCalledWith('end', 'r-1');
+  });
+
+  it('shows a status as a dot, which End session covers on hover', () => {
+    mocks.sessionAttention = { 'r-1': 'waiting', 'r-2': 'running' };
+    renderSidebar();
+
+    const dot = (name: string) =>
+      sessionRow(name).querySelector('[data-session-status-dot]');
+    expect(dot('Weekly report')).toHaveAttribute(
+      'data-session-status-dot',
+      'hitl'
+    );
+    expect(dot('Weekly report')).toHaveClass(
+      '!text-ds-icon-warning-default-default',
+      'group-hover/session-item:hidden'
+    );
+    expect(dot('Competitor scan')).toHaveClass(
+      '!text-ds-icon-information-default-default'
+    );
+    // No status, no dot.
+    expect(dot('Pricing notes')).toBeNull();
+  });
+
+  it('drops a result dot once it is read, but keeps open questions', async () => {
+    const user = userEvent.setup();
+    mocks.sessionAttention = { 'r-1': 'waiting' };
+    useProjectRuntimeStore.setState({
+      navLeadByProjectId: {
+        'r-2': presentationForKind('finished'),
+        'r-3': presentationForKind('error'),
+      },
+    });
+    useSessionControlsStore.setState({ seenOutcomes: { 'r-3': 'error' } });
+    renderSidebar();
+
+    const dot = (name: string) =>
+      sessionRow(name).querySelector('[data-session-status-dot]');
+    expect(dot('Competitor scan')).toHaveAttribute(
+      'data-session-status-dot',
+      'finished'
+    );
+    expect(dot('Pricing notes')).toBeNull();
+    expect(dot('Weekly report')).toHaveAttribute(
+      'data-session-status-dot',
+      'hitl'
+    );
+
+    // An unread result offers Mark as read, which clears its dot.
+    fireEvent.contextMenu(sessionRow('Competitor scan'));
+    await user.click(
+      await screen.findByRole('menuitem', { name: 'Mark as read' })
+    );
+    expect(dot('Competitor scan')).toBeNull();
+  });
+
+  it('moves pinned Sessions out of their Space into Pinned, above Spaces', () => {
+    useSessionControlsStore.setState({ pinnedProjectIds: ['o-1', 'r-2'] });
+    renderSidebar();
+
+    const pinnedHeader = within(sidebar()).getByRole('button', {
+      name: 'Pinned',
+    });
+    const spacesHeader = within(sidebar()).getByRole('button', {
+      name: 'Spaces',
+    });
+    expect(
+      pinnedHeader.compareDocumentPosition(spacesHeader) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+
+    // Pin order, each naming its Space.
+    const scan = sessionRow(/^Competitor scan/);
+    const invoices = sessionRow(/^Vendor invoices/);
+    expect(
+      invoices.compareDocumentPosition(scan) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(scan).toHaveTextContent('Research');
+    expect(scan.closest('[data-home-space]')).toBeNull();
+
+    // The Space lists the rest, so four unpinned Sessions need no Show all.
+    const research = sidebar().querySelector(
+      '[data-home-space="space-research"]'
+    ) as HTMLElement;
+    expect(
+      within(research).getByRole('button', { name: 'Old notes' })
+    ).toBeInTheDocument();
+    expect(
+      within(research).queryByRole('button', { name: /^Show all/ })
+    ).not.toBeInTheDocument();
+  });
+
+  it('has no Pinned section without a pinned Session', () => {
+    renderSidebar();
+
+    expect(
+      within(sidebar()).queryByRole('button', { name: 'Pinned' })
+    ).not.toBeInTheDocument();
+  });
+
+  it('keeps a pinned Session out of One list', () => {
+    usePageTabStore.setState({ homeSidebarGrouping: 'list' });
+    useSessionControlsStore.setState({ pinnedProjectIds: ['r-2'] });
+    renderSidebar();
+
+    // One row, in Pinned, rather than a second one under Sessions.
+    expect(sessionRow(/^Competitor scan/)).toBeInTheDocument();
+    expect(
+      within(sidebar()).getByRole('button', { name: 'Pinned' })
+    ).toBeInTheDocument();
+  });
+
+  it('marks a Session unread and read from its menu', async () => {
+    const user = userEvent.setup();
+    renderSidebar();
+
+    fireEvent.contextMenu(sessionRow('Pricing notes'));
+    await user.click(
+      await screen.findByRole('menuitem', { name: 'Mark as unread' })
+    );
+    expect(useSessionControlsStore.getState().unreadProjectIds).toContain(
+      'r-3'
+    );
+    expect(
+      sessionRow('Pricing notes').querySelector('[data-session-status-dot]')
+    ).toHaveAttribute('data-session-status-dot', 'unread');
+    expect(
+      within(sessionRow('Pricing notes')).getByText('Pricing notes')
+    ).toHaveClass('font-semibold');
+
+    fireEvent.contextMenu(sessionRow('Pricing notes'));
+    await user.click(
+      await screen.findByRole('menuitem', { name: 'Mark as read' })
+    );
+    expect(useSessionControlsStore.getState().unreadProjectIds).not.toContain(
+      'r-3'
+    );
+  });
+
+  it('opens the Session menu on right-click', async () => {
+    const user = userEvent.setup();
+    const requestAction = vi.fn();
+    const togglePinned = vi.fn();
+    useSessionControlsStore.setState({ requestAction, togglePinned });
+    renderSidebar();
+
+    const openMenu = async () => {
+      fireEvent.contextMenu(sessionRow('Weekly report'), {
+        clientX: 40,
+        clientY: 60,
+      });
+      return screen.findByRole('menu');
+    };
+
+    const menu = await openMenu();
+    expect(
+      within(menu)
+        .getAllByRole('menuitem')
+        .map((item) => item.textContent?.trim())
+    ).toEqual([
+      'Pin',
+      'Rename session',
+      'Open in new window',
+      'Mark as unread',
+      'End session',
+      'Delete session',
+    ]);
+    // Delete stands apart, as in the Session page's menu.
+    expect(within(menu).getByRole('separator')).toBeInTheDocument();
+
+    await user.click(
+      within(menu).getByRole('menuitem', { name: 'Rename session' })
+    );
+    expect(requestAction).toHaveBeenCalledWith('rename', 'r-1');
+
+    await user.click(
+      within(await openMenu()).getByRole('menuitem', { name: 'Pin' })
+    );
+    expect(togglePinned).toHaveBeenCalledWith('r-1');
+
+    await user.click(
+      within(await openMenu()).getByRole('menuitem', {
+        name: 'Open in new window',
+      })
+    );
+    expect(mocks.openSessionWindow).toHaveBeenCalledWith({
+      spaceId: 'space-research',
+      projectId: 'r-1',
+    });
+  });
+
+  it('pins a Space and deletes it with its Sessions from its row menu', async () => {
+    const user = userEvent.setup();
+    mocks.deleteSpaceAndSessions.mockResolvedValue(undefined);
+    renderSidebar();
+
+    await user.click(
+      within(sidebar()).getByRole('button', { name: 'More actions for Ops' })
+    );
+    await user.click(
+      await screen.findByRole('menuitem', { name: 'Pin Space' })
+    );
+    expect(
+      useSpaceStore.getState().pinnedSpaceIdsByUser[pinnedSpaceOwnerKey(null)]
+    ).toEqual(['space-research', 'space-ops']);
+
+    await user.click(
+      within(sidebar()).getByRole('button', { name: 'More actions for Ops' })
+    );
+    expect(
+      await screen.findByRole('menuitem', { name: 'Unpin Space' })
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole('menuitem', { name: 'Delete Space' }));
+    const confirm = await screen.findByRole('alertdialog');
+    await user.click(within(confirm).getByRole('button', { name: 'Delete' }));
+
+    expect(mocks.deleteSpaceAndSessions).toHaveBeenCalledWith(
+      'space-ops',
+      expect.objectContaining({ identity: expect.any(Object) })
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    );
+  });
+
+  it('lists every Space with four recent Sessions and Show all, without a pin mark', async () => {
     const user = userEvent.setup();
     mocks.spaceAttention = { 'space-ops': { running: 1, waiting: 0 } };
     renderSidebar();
@@ -253,9 +605,35 @@ describe('HomeSidebar', () => {
     expect(
       within(research).queryByRole('button', { name: 'Old notes' })
     ).not.toBeInTheDocument();
+    // Pinned Spaces already show on the rail, so the row has no pin mark.
     expect(
-      within(research).getByRole('button', { name: 'Research, Pinned' })
+      within(research).getByRole('button', { name: 'Research' })
     ).toBeInTheDocument();
+    expect(research.querySelector('.lucide-pin')).toBeNull();
+    // Nested rows keep their indent inside, so hover fills span full width,
+    // and every row sits 2px apart.
+    const sessionRow = within(research)
+      .getByRole('button', { name: 'Weekly report' })
+      .closest('.group\\/session-item') as HTMLElement;
+    expect(sessionRow).toHaveClass('pl-ds-40');
+    // The name lines up with the Space's, so the row has no leading icon.
+    expect(
+      within(sessionRow)
+        .getByRole('button', { name: 'Weekly report' })
+        .querySelector('svg')
+    ).toBeNull();
+    const showAll = within(research).getByRole('button', {
+      name: 'Show all 5 sessions in Research',
+    });
+    expect(within(showAll).getByText('Show all 5')).toHaveClass(
+      'text-ds-text-base',
+      'text-ds-ink-subtle-default'
+    );
+    const nestedRows = research.lastElementChild as HTMLElement;
+    expect(nestedRows).toContainElement(sessionRow);
+    expect(nestedRows).not.toHaveClass('pl-ds-12');
+    expect(nestedRows).toHaveClass('gap-0.5');
+    expect(research).toHaveClass('gap-0.5');
     expect(
       within(sidebar()).getByRole('button', { name: 'Ops, 1 running' })
     ).toBeInTheDocument();
@@ -263,14 +641,27 @@ describe('HomeSidebar', () => {
       document.querySelector('[data-home-space-status="running"]')
     ).not.toBeNull();
 
+    // Show all lists the rest in place, without leaving Home.
+    const locationBefore = screen.getByTestId('location').textContent;
+    await user.click(showAll);
+    expect(
+      within(research).getByRole('button', { name: 'Old notes' })
+    ).toBeInTheDocument();
+    expect(screen.getByTestId('location').textContent).toBe(locationBefore);
+
     await user.click(
+      within(research).getByRole('button', {
+        name: 'Show fewer sessions in Research',
+      })
+    );
+    expect(
+      within(research).queryByRole('button', { name: 'Old notes' })
+    ).not.toBeInTheDocument();
+    expect(
       within(research).getByRole('button', {
         name: 'Show all 5 sessions in Research',
       })
-    );
-    expect(screen.getByTestId('location')).toHaveTextContent(
-      '/home?section=spaces&spaceId=space-research&spaceTab=projects'
-    );
+    ).toBeInTheDocument();
   });
 
   it('folds a Space from its icon and remembers the fold', async () => {
@@ -306,15 +697,12 @@ describe('HomeSidebar', () => {
   });
 
   it('collects waiting Sessions in Needs you without moving them', () => {
-    const { rerender } = renderSidebar();
+    renderSidebar();
     expect(screen.queryByText('Needs you')).not.toBeInTheDocument();
 
     mocks.sessionAttention = { 'o-1': 'waiting', 'r-2': 'running' };
-    rerender(
-      <MemoryRouter>
-        <HomeSidebar />
-      </MemoryRouter>
-    );
+    // The mocked hook can't notify, so any store update redraws the sidebar.
+    act(() => useSessionControlsStore.setState({ seenOutcomes: {} }));
     const needsYou = screen
       .getByText('Needs you')
       .closest('div.flex-col') as HTMLElement;
@@ -323,11 +711,8 @@ describe('HomeSidebar', () => {
     ).toBeInTheDocument();
 
     mocks.sessionAttention = { 'r-1': 'waiting', 'o-1': 'waiting' };
-    rerender(
-      <MemoryRouter>
-        <HomeSidebar />
-      </MemoryRouter>
-    );
+    // The mocked hook can't notify, so any store update redraws the sidebar.
+    act(() => useSessionControlsStore.setState({ seenOutcomes: {} }));
     const rows = within(
       screen.getByText('Needs you').closest('div.flex-col') as HTMLElement
     )
@@ -354,11 +739,30 @@ describe('HomeSidebar', () => {
     expect(mocks.switchToSpace).toHaveBeenCalledWith('space-ops', {
       project: 'o-1',
       tab: null,
+      hydrate: false,
     });
     expect(usePageTabStore.getState().shellPlace).toBe('home');
     await waitFor(() =>
       expect(screen.getByTestId('location')).toHaveTextContent(/^\/$/)
     );
+  });
+
+  it('opens New session when the switch shows the Session is gone', async () => {
+    const user = userEvent.setup();
+    mocks.switchToSpace.mockImplementationOnce(async () => {
+      useSpaceStore.setState({ projectIdIndex: {}, projectsBySpaceId: {} });
+      return true;
+    });
+    renderSidebar('/home?section=spaces');
+
+    await user.click(
+      within(sidebar()).getByRole('button', { name: 'Vendor invoices' })
+    );
+
+    await waitFor(() =>
+      expect(usePageTabStore.getState().activeWorkspaceTab).toBe('new-project')
+    );
+    expect(mocks.openSessionInShell).not.toHaveBeenCalled();
   });
 
   it('opens a Session of the active Space without switching Spaces', async () => {
@@ -383,7 +787,7 @@ describe('HomeSidebar', () => {
     expect(ops).toHaveAttribute('aria-current', 'page');
 
     await user.click(
-      within(sidebar()).getByRole('button', { name: 'Research, Pinned' })
+      within(sidebar()).getByRole('button', { name: 'Research' })
     );
     expect(screen.getByTestId('location')).toHaveTextContent(
       '/home?section=spaces&spaceId=space-research'

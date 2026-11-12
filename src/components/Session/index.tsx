@@ -14,6 +14,7 @@
 
 import ChatBox from '@/components/ChatBox';
 import { SessionArtifactPreview } from '@/components/ChatBox/SessionArtifactPreview';
+import { SessionLoadingScan } from '@/components/ChatBox/SessionLoadingScan';
 import { HeaderBox } from '@/components/Session/HeaderBox';
 import { PreviewPanel } from '@/components/Session/PreviewPanel';
 import Workspace from '@/components/Workspace';
@@ -70,8 +71,6 @@ import { SessionSidePanel } from './SidePanel';
  * moves to the Session created by the first task.
  */
 export interface NewSessionComposerSlots {
-  /** Shown above the composer, for example Home's greeting. */
-  above?: ReactNode;
   /** First control in the composer toolbar, for example a Space chip. */
   footerLeading?: ReactNode;
 }
@@ -83,7 +82,7 @@ interface SessionProps {
   projectId?: string | null;
   /** Extra controls at the right end of the Session header (split panes). */
   headerActions?: ReactNode;
-  /** New session only: content above the composer and in its toolbar. */
+  /** New session only: extra controls in the composer's toolbar. */
   newSessionComposer?: NewSessionComposerSlots;
 }
 
@@ -518,7 +517,11 @@ function SessionContent({
     !chatStore &&
     sessionExecution.state.route?.route === 'legacy'
   ) {
-    return null;
+    return (
+      <div className="relative h-full w-full">
+        <SessionLoadingScan active label={t('chat.timeline-history-loading')} />
+      </div>
+    );
   }
 
   const sessionSidePanel =
@@ -577,7 +580,6 @@ function SessionContent({
           }
           totalTokens={isNewProject ? 0 : (activeTask?.tokens ?? 0)}
           showTimelineStyle={!isNewProject}
-          showBack={!isNewProject}
           summary={{
             open: showSummary,
             onToggle: toggleSidePanel,
@@ -597,7 +599,6 @@ function SessionContent({
                 embedded
                 sessionMode={displaySessionMode ?? SessionMode.SINGLE_AGENT}
                 onSessionModeChange={handleNewProjectSessionModeChange}
-                composerAbove={newSessionComposer?.above}
                 composerFooterLeading={newSessionComposer?.footerLeading}
               />
             ) : (

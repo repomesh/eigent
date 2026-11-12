@@ -13,6 +13,7 @@
 // ========= Copyright 2025-2026 @ Eigent.ai All Rights Reserved. =========
 
 import {
+  displayedWorkspaceTab,
   isHomePlaceTab,
   usePageTabStore,
   type PageTabState,
@@ -52,6 +53,13 @@ describe('pageTabStore shell place', () => {
       shellPlace: 'space',
     });
     expect(isHomePlaceTab(tab)).toBe(false);
+  });
+
+  it('shows the composer landing as New session and leaves other tabs alone', () => {
+    expect(displayedWorkspaceTab('workforce')).toBe('new-project');
+    expect(displayedWorkspaceTab('new-project')).toBe('new-project');
+    expect(displayedWorkspaceTab('project')).toBe('project');
+    expect(displayedWorkspaceTab('files')).toBe('files');
   });
 
   it('moves to the Space view when the add-automation dialog opens', () => {
@@ -101,5 +109,58 @@ describe('pageTabStore shell place', () => {
       )
     ).toMatchObject({ shellPlace: 'space', homeFoldedSpaceIds: [] });
     expect(merge(undefined, current).shellPlace).toBe('space');
+  });
+
+  it('opens the Workspace page on a chosen tab, in the Space view', () => {
+    usePageTabStore.setState({ shellPlace: 'home' });
+
+    usePageTabStore.getState().openSpaceWorkspaceTab('workspace-profile');
+
+    expect(usePageTabStore.getState()).toMatchObject({
+      activeWorkspaceTab: 'space-workspace',
+      spaceWorkspaceTab: 'workspace-profile',
+      shellPlace: 'space',
+    });
+  });
+
+  it('persists the Spaces sort and restores only a known value', () => {
+    const options = usePageTabStore.persist.getOptions();
+    usePageTabStore.getState().setHomeSpaceSort('created');
+    expect(options.partialize!(usePageTabStore.getState())).toMatchObject({
+      homeSpaceSort: 'created',
+    });
+
+    const current = usePageTabStore.getInitialState();
+    const merge = options.merge!;
+    expect(merge({ homeSpaceSort: 'created' }, current).homeSpaceSort).toBe(
+      'created'
+    );
+    expect(
+      merge(
+        { homeSpaceSort: 'name' } as unknown as Partial<PageTabState>,
+        current
+      ).homeSpaceSort
+    ).toBe('updated');
+    expect(merge(undefined, current).homeSpaceSort).toBe('updated');
+  });
+
+  it('persists the sidebar grouping and restores only a known value', () => {
+    const options = usePageTabStore.persist.getOptions();
+    usePageTabStore.getState().setHomeSidebarGrouping('list');
+    expect(options.partialize!(usePageTabStore.getState())).toMatchObject({
+      homeSidebarGrouping: 'list',
+    });
+
+    const current = usePageTabStore.getInitialState();
+    const merge = options.merge!;
+    expect(
+      merge({ homeSidebarGrouping: 'list' }, current).homeSidebarGrouping
+    ).toBe('list');
+    expect(
+      merge(
+        { homeSidebarGrouping: 'folders' } as unknown as Partial<PageTabState>,
+        current
+      ).homeSidebarGrouping
+    ).toBe('spaces');
   });
 });

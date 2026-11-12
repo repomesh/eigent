@@ -22,9 +22,8 @@ import {
 } from '@/components/Background';
 import { WorkspaceDispatch } from '@/components/Dispatch';
 import Folder from '@/components/Folder';
-import { GlobalSearchDialog } from '@/components/GlobalSearch';
-import { HomeNewSessionGreeting } from '@/components/Home/HomeNewSession';
 import HomeSidebar from '@/components/Home/HomeSidebar';
+import { HomeSidebarSlot } from '@/components/Home/HomeSidebarHost';
 import { NewSessionSpaceChip } from '@/components/Home/NewSessionSpaceChip';
 import AppShellLayout, {
   APP_SHELL_CONTENT_CLASS,
@@ -32,9 +31,8 @@ import AppShellLayout, {
 import SessionGroup from '@/components/Session/SidePanel/components/SessionGroup';
 import SpaceSidebar from '@/components/SpaceSidebar';
 import TriggerPanel from '@/components/Trigger';
-import Workspace from '@/components/Workspace';
-import { SpaceOverviewPanel } from '@/components/Workspace/SpaceOverview';
 import useChatStoreAdapter from '@/hooks/useChatStoreAdapter';
+import { useMarkSessionOutcomeSeen } from '@/hooks/useMarkSessionOutcomeSeen';
 import { useHost } from '@/host';
 import { filterVisibleAgentFiles } from '@/lib/agentFileFilters';
 import { cn } from '@/lib/utils';
@@ -52,7 +50,11 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import { useAuthStore, type WorkspaceMainBackground } from '@/store/authStore';
-import { usePageTabStore, WorkspaceTab } from '@/store/pageTabStore';
+import {
+  displayedWorkspaceTab,
+  usePageTabStore,
+  WorkspaceTab,
+} from '@/store/pageTabStore';
 import { useSpaceStore } from '@/store/spaceStore';
 
 import Session from '@/components/Session';
@@ -83,18 +85,17 @@ export default function WorkspacePage() {
     activeProjectId ? state.getProjectMeta(activeProjectId) : null
   );
 
-  const {
-    activeWorkspaceTab: storedWorkspaceTab,
-    setHasAgentFiles,
-    setActiveWorkspaceTab,
-  } = usePageTabStore();
+  const storedWorkspaceTab = usePageTabStore((s) => s.activeWorkspaceTab);
+  const setHasAgentFiles = usePageTabStore((s) => s.setHasAgentFiles);
+  const setActiveWorkspaceTab = usePageTabStore((s) => s.setActiveWorkspaceTab);
   const shellPlace = usePageTabStore((s) => s.shellPlace);
   const inHome = shellPlace === 'home';
-  // Home shows a Session or New session; its composer landing is New session.
+  // The composer landing is New session everywhere, and Home shows only a
+  // Session or New session.
   const activeWorkspaceTab =
     inHome && storedWorkspaceTab !== WorkspaceTab.Project
       ? WorkspaceTab.NewProject
-      : storedWorkspaceTab;
+      : displayedWorkspaceTab(storedWorkspaceTab);
   const workspaceSidebarHidden = usePageTabStore(
     (s) => s.workspaceSidebarHidden
   );
@@ -119,21 +120,13 @@ export default function WorkspacePage() {
   );
   useSessionSplitFocusTracking();
   useMainWindowSessionWindows();
+  useMarkSessionOutcomeSeen(
+    activeWorkspaceTab === WorkspaceTab.Project && !activeProjectWindowed
+      ? activeProjectId
+      : null
+  );
 
   const [, setActiveWebviewId] = useState<string | null>(null);
-  // ⌘K search belongs to the page, so it works next to either sidebar.
-  const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
-
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        setGlobalSearchOpen(true);
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
   const [triggerDialogOpen, setTriggerDialogOpen] = useState(false);
   const [triggerSelectedId, setTriggerSelectedId] = useState<number | null>(
     null
@@ -399,9 +392,7 @@ export default function WorkspacePage() {
   const mainPanelContentClass = APP_SHELL_CONTENT_CLASS;
 
   const useWorkspacePatternBg =
-    activeWorkspaceTab === 'workforce' ||
-    activeWorkspaceTab === 'project' ||
-    activeWorkspaceTab === 'new-project';
+    activeWorkspaceTab === 'project' || activeWorkspaceTab === 'new-project';
   const workspacePatternKey = useMemo((): WorkspaceMainBackground => {
     if (!useWorkspacePatternBg) return 'empty';
     return (workspaceMainBackground ?? 'empty') as WorkspaceMainBackground;
@@ -447,18 +438,6 @@ export default function WorkspacePage() {
 
   const renderActiveWorkspaceTab = () => {
     switch (activeWorkspaceTab) {
-      case 'workforce':
-        return (
-          <div className={workspaceMainContentClass}>
-            {workspacePatternOverlayEl}
-            <div className={cn(workspaceMainForegroundClass, 'flex-row')}>
-              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-                <Workspace />
-              </div>
-              <SpaceOverviewPanel />
-            </div>
-          </div>
-        );
       case 'project':
         return (
           <div className={workspaceMainContentClass}>
@@ -487,7 +466,6 @@ export default function WorkspacePage() {
                 newSessionComposer={
                   inHome
                     ? {
-                        above: <HomeNewSessionGreeting />,
                         footerLeading: <NewSessionSpaceChip />,
                       }
                     : undefined
@@ -547,13 +525,15 @@ export default function WorkspacePage() {
 
   return (
     <ReactFlowProvider>
-      <GlobalSearchDialog
-        open={globalSearchOpen}
-        onOpenChange={setGlobalSearchOpen}
-      />
       <AppShellLayout
         sidebar={
-          inHome ? <HomeSidebar /> : <SpaceSidebar chatStore={chatStore} />
+          inHome ? (
+            <HomeSidebarSlot workspace>
+              <HomeSidebar />
+            </HomeSidebarSlot>
+          ) : (
+            <SpaceSidebar />
+          )
         }
         sidebarHidden={workspaceSidebarHidden}
         /* Always mounted: hosts preview <webview> guests so their pages and

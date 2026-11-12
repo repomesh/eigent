@@ -465,14 +465,16 @@ describe('SettingsPage', () => {
     expect(
       screen.getByRole('button', { name: 'Extension' }).querySelector('svg')
     ).toHaveClass('lucide-puzzle');
+    // App-wide settings are the General tab, with no group heading of its own.
     expect(
       within(sidebar)
-        .getByRole('button', { name: 'Settings' })
+        .getByRole('button', { name: 'General' })
         .querySelector('svg')
     ).toHaveClass('lucide-settings');
     expect(
-      within(sidebar).queryByRole('button', { name: 'General' })
+      within(sidebar).queryByRole('button', { name: 'Settings' })
     ).not.toBeInTheDocument();
+    expect(within(sidebar).queryByText('Settings')).not.toBeInTheDocument();
     expect(
       within(sidebar).queryByRole('button', { name: 'Appearance' })
     ).not.toBeInTheDocument();
@@ -555,6 +557,8 @@ describe('SettingsPage', () => {
     const collectionHeader = toolbar.closest('header');
     const list = document.querySelector('[data-home-spaces-list]');
     expect(collectionHeader).toBe(settingsFrame);
+    // The page is named like the sidebar tab that opens it.
+    expect(collectionHeader).toHaveTextContent('All Spaces');
     expect(collectionHeader).toHaveClass('min-h-ds-layout-row-header');
     expect(
       collectionHeader?.querySelector('[data-content-header-divider]')
@@ -695,8 +699,11 @@ describe('SettingsPage', () => {
     renderSettingsPage();
 
     const sidebar = screen.getByRole('complementary', { name: 'Settings' });
-    await user.click(within(sidebar).getByRole('button', { name: 'Settings' }));
+    await user.click(within(sidebar).getByRole('button', { name: 'General' }));
 
+    expect(
+      await screen.findByRole('heading', { name: 'General', level: 1 })
+    ).toBeInTheDocument();
     const general = await screen.findByTestId('general-settings');
     const appearance = screen.getByTestId('appearance-settings');
     const privacy = screen.getByTestId('privacy-settings');
@@ -713,11 +720,13 @@ describe('SettingsPage', () => {
     expect(
       privacy.compareDocumentPosition(about) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
+    // One page: its title is the only heading, with none per category.
     expect(
-      screen.queryByRole('heading', {
-        name: /general|appearance|privacy|about/i,
-      })
+      screen.queryByRole('heading', { name: /appearance|privacy|about/i })
     ).not.toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { name: /general/i })).toHaveLength(
+      1
+    );
   });
 
   it('shows one Skills overview with source filters instead of ownership tabs', async () => {
@@ -1049,7 +1058,7 @@ describe('SettingsPage', () => {
       )
     );
     expect(
-      await screen.findByRole('heading', { name: 'Workspace', level: 1 })
+      await screen.findByRole('heading', { name: 'Origin Space', level: 1 })
     ).toBeInTheDocument();
     expect(
       within(homeSidebar).getByRole('button', { name: 'Origin Space' })
@@ -1208,17 +1217,20 @@ describe('SettingsPage', () => {
       '[data-content-header-frame]'
     ) as HTMLElement;
     expect(detailHeader.querySelector('.px-ds-16')).toBeInTheDocument();
-    // The top bar names the Space, so the page title is "Workspace".
+    // The title is the Space's name, and it opens the Space menu.
     const detailHeading = within(detailHeader).getByRole('heading', {
-      name: 'Workspace',
+      name: 'Design Space',
       level: 1,
     });
     expect(detailHeading).toHaveClass('!text-ds-text-body-large');
     expect(
+      within(detailHeading).getByRole('button', { name: 'Design Space' })
+    ).toHaveAttribute('aria-haspopup', 'menu');
+    expect(
       within(detailHeader).getByRole('button', { name: 'Pin Space' })
     ).toHaveAttribute('data-variant', 'secondary');
     const openInSpaceViewButton = within(detailHeader).getByRole('button', {
-      name: 'Open in Space view',
+      name: 'Open workspace',
     });
     expect(openInSpaceViewButton).toHaveAttribute('data-variant', 'primary');
     expect(openInSpaceViewButton).toHaveClass('!rounded-full');
@@ -1231,7 +1243,7 @@ describe('SettingsPage', () => {
       'Sessions',
       'Tasks',
       'Automations',
-      'Context',
+      'Files',
       'Memory',
       'Space settings',
     ]) {
@@ -1257,8 +1269,8 @@ describe('SettingsPage', () => {
       document.querySelector('[data-space-stat="Sessions"] svg')
     ).toHaveClass('lucide-message-circle');
     expect(
-      screen.getByRole('tab', { name: 'Context' }).querySelector('svg')
-    ).toHaveClass('lucide-library');
+      screen.getByRole('tab', { name: 'Files' }).querySelector('svg')
+    ).toHaveClass('lucide-inbox');
     expect(
       screen.getByRole('tab', { name: 'Space settings' }).querySelector('svg')
     ).toHaveClass('lucide-settings');

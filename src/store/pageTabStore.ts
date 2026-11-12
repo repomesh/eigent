@@ -65,8 +65,33 @@ export function isHomePlaceTab(tab: WorkspaceTabId): boolean {
   );
 }
 
+/**
+ * The tab on screen. The composer landing (`workforce`) is drawn as New
+ * session, so anything that highlights or reacts to the page reads this
+ * instead of the stored tab.
+ */
+export function displayedWorkspaceTab(tab: WorkspaceTabId): WorkspaceTabId {
+  return tab === WorkspaceTab.Workforce ? WorkspaceTab.NewProject : tab;
+}
+
 export function normalizeShellPlace(value: unknown): ShellPlace {
   return value === 'home' ? 'home' : 'space';
+}
+
+/** How Home's sidebar orders Spaces: by last activity, or newest first. */
+export type HomeSpaceSort = 'updated' | 'created';
+
+export function normalizeHomeSpaceSort(value: unknown): HomeSpaceSort {
+  return value === 'created' ? 'created' : 'updated';
+}
+
+/** Whether Home's sidebar groups Sessions under their Spaces or lists them all. */
+export type HomeSidebarGrouping = 'spaces' | 'list';
+
+export function normalizeHomeSidebarGrouping(
+  value: unknown
+): HomeSidebarGrouping {
+  return value === 'list' ? 'list' : 'spaces';
 }
 
 export interface SessionBrowserNavigationState {
@@ -541,9 +566,23 @@ export interface PageTabState {
    */
   shellPlace: ShellPlace;
   setShellPlace: (place: ShellPlace) => void;
+  /** The tab the Space view's Workspace page shows. */
+  spaceWorkspaceTab: string;
+  setSpaceWorkspaceTab: (tab: string) => void;
+  /** Open the Space view's Workspace page on one of its tabs. */
+  openSpaceWorkspaceTab: (tab: string) => void;
   /** Spaces folded in the Home sidebar. Persisted. */
   homeFoldedSpaceIds: string[];
   setHomeSpaceFolded: (spaceId: string, folded: boolean) => void;
+  /** Spaces showing every Session in the Home sidebar, until the app closes. */
+  homeExpandedSpaceIds: string[];
+  setHomeSpaceExpanded: (spaceId: string, expanded: boolean) => void;
+  /** Spaces order in the Home sidebar. Persisted. */
+  homeSpaceSort: HomeSpaceSort;
+  setHomeSpaceSort: (sort: HomeSpaceSort) => void;
+  /** Home sidebar grouping. Persisted. */
+  homeSidebarGrouping: HomeSidebarGrouping;
+  setHomeSidebarGrouping: (grouping: HomeSidebarGrouping) => void;
   /**
    * Workspace rail visibility, toggled from the title bar. Only the workspace
    * shell honours this — Home and Settings always show their rail.
@@ -887,6 +926,18 @@ export const usePageTabStore = create<PageTabState>()(
         }),
       shellPlace: 'space',
       setShellPlace: (place) => set({ shellPlace: normalizeShellPlace(place) }),
+      spaceWorkspaceTab: 'projects',
+      setSpaceWorkspaceTab: (tab) => set({ spaceWorkspaceTab: tab }),
+      openSpaceWorkspaceTab: (tab) => {
+        set({ spaceWorkspaceTab: tab });
+        get().setActiveWorkspaceTab(WorkspaceTab.SpaceWorkspace);
+      },
+      homeSpaceSort: 'updated',
+      setHomeSpaceSort: (sort) =>
+        set({ homeSpaceSort: normalizeHomeSpaceSort(sort) }),
+      homeSidebarGrouping: 'spaces',
+      setHomeSidebarGrouping: (grouping) =>
+        set({ homeSidebarGrouping: normalizeHomeSidebarGrouping(grouping) }),
       homeFoldedSpaceIds: [],
       setHomeSpaceFolded: (spaceId, folded) =>
         set((state) => {
@@ -896,6 +947,17 @@ export const usePageTabStore = create<PageTabState>()(
             homeFoldedSpaceIds: folded
               ? [...state.homeFoldedSpaceIds, spaceId]
               : state.homeFoldedSpaceIds.filter((id) => id !== spaceId),
+          };
+        }),
+      homeExpandedSpaceIds: [],
+      setHomeSpaceExpanded: (spaceId, expanded) =>
+        set((state) => {
+          const isExpanded = state.homeExpandedSpaceIds.includes(spaceId);
+          if (isExpanded === expanded) return state;
+          return {
+            homeExpandedSpaceIds: expanded
+              ? [...state.homeExpandedSpaceIds, spaceId]
+              : state.homeExpandedSpaceIds.filter((id) => id !== spaceId),
           };
         }),
       workspaceSidebarHidden: false,
@@ -1810,6 +1872,10 @@ export const usePageTabStore = create<PageTabState>()(
                 (id): id is string => typeof id === 'string'
               )
             : currentState.homeFoldedSpaceIds,
+          homeSpaceSort: normalizeHomeSpaceSort(persisted.homeSpaceSort),
+          homeSidebarGrouping: normalizeHomeSidebarGrouping(
+            persisted.homeSidebarGrouping
+          ),
         };
       },
       partialize: (state) => ({
@@ -1817,6 +1883,8 @@ export const usePageTabStore = create<PageTabState>()(
         workspaceSidebarHidden: state.workspaceSidebarHidden,
         shellPlace: state.shellPlace,
         homeFoldedSpaceIds: state.homeFoldedSpaceIds,
+        homeSpaceSort: state.homeSpaceSort,
+        homeSidebarGrouping: state.homeSidebarGrouping,
         chatTimelineDetailLevel: state.chatTimelineDetailLevel,
         narrativeInformationDensity: state.narrativeInformationDensity,
         customAgentFolderPathByProjectId:

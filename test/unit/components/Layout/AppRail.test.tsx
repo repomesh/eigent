@@ -17,9 +17,9 @@ import {
   AppRail,
   getAppRailPlace,
   shouldShowAppRail,
-  spaceRailTileInitial,
   usePinnedSpacesChooser,
 } from '@/components/Layout/AppRail';
+import { spaceInitial } from '@/components/SpaceSidebar/SpaceGlyph';
 import { APP_COMMAND } from '@/shared/appCommands';
 import { usePageTabStore } from '@/store/pageTabStore';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -376,9 +376,12 @@ describe('AppRail pinned Spaces', () => {
     const user = userEvent.setup();
     renderRail('/');
 
-    within(rail()).getByRole('button', { name: 'Ops' }).focus();
+    const tile = within(rail()).getByRole('button', { name: 'Ops' });
+    expect(tile).toHaveAttribute('aria-expanded', 'false');
+    tile.focus();
     await user.keyboard('{Shift>}{F10}{/Shift}');
     const menu = await screen.findByRole('menu');
+    expect(tile).toHaveAttribute('aria-expanded', 'true');
     expect(
       within(menu).queryByRole('menuitem', { name: 'Move up' })
     ).toBeNull();
@@ -512,6 +515,6 @@ describe('rail helpers', () => {
     ['🚀 Launch', '🚀'],
     ['', '?'],
   ])('uses %j -> %j as the tile initial', (name, initial) => {
-    expect(spaceRailTileInitial(name)).toBe(initial);
+    expect(spaceInitial(name)).toBe(initial);
   });
 });

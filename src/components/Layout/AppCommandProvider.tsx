@@ -19,7 +19,7 @@ import { useSpaceSwitch } from '@/hooks/useSpaceSwitch';
 import { useHost, type AppShellElectronAPI } from '@/host';
 import { ensureProjectRuntimeLoaded } from '@/lib/projectRuntimeHydration';
 import { getSessionWindowRole } from '@/lib/sessionWindows';
-import { isHomePagePath, shellBackState } from '@/lib/shellRoutes';
+import { isHomePagePath } from '@/lib/shellRoutes';
 import { runAfterWorkspaceConfigurationSave } from '@/lib/workspaceConfigurationNavigationGuard';
 import {
   APP_COMMAND,
@@ -29,6 +29,7 @@ import {
 import { normalizeNativeMenuLocale } from '@/shared/nativeMenu';
 import { isChatEventTimelineEnabled } from '@/store/chatEventProjectionBridge';
 import {
+  displayedWorkspaceTab,
   isHomePlaceTab,
   usePageTabStore,
   WorkspaceTab,
@@ -108,7 +109,8 @@ export function AppCommandProvider({ children }: { children: ReactNode }) {
   // Preview and Summary columns also exist on the New session page.
   const isSessionLayoutTab =
     isProjectTab ||
-    (isWorkspacePage && activeWorkspaceTab === WorkspaceTab.NewProject);
+    (isWorkspacePage &&
+      displayedWorkspaceTab(activeWorkspaceTab) === WorkspaceTab.NewProject);
 
   const openFilesTab = useCallback(() => {
     const projectStore = useProjectRuntimeStore.getState();
@@ -237,18 +239,18 @@ export function AppCommandProvider({ children }: { children: ReactNode }) {
             }
             setShellPlace('home');
             requestWorkspaceChatFocus();
-            navigate('/');
+            if (location.pathname !== '/') navigate('/');
           });
           return;
         case APP_COMMAND.navigateWorkspace:
           // ⌘1 opens the Space's Workspace page, the Space row in the sidebar.
           void runAfterWorkspaceConfigurationSave(() => {
             closeSettings();
-            setActiveWorkspaceTab(
-              activeSpaceId
-                ? WorkspaceTab.SpaceWorkspace
-                : WorkspaceTab.Workforce
-            );
+            if (activeSpaceId) {
+              usePageTabStore.getState().openSpaceWorkspaceTab('projects');
+            } else {
+              setActiveWorkspaceTab(WorkspaceTab.Workforce);
+            }
             setShellPlace('space');
             navigate('/');
           });
@@ -279,12 +281,10 @@ export function AppCommandProvider({ children }: { children: ReactNode }) {
           if (!activeSpaceId) return;
           void runAfterWorkspaceConfigurationSave(() => {
             closeSettings();
-            navigate(
-              `/home?section=spaces&spaceId=${encodeURIComponent(activeSpaceId)}&spaceTab=workspace-profile`,
-              {
-                state: shellBackState(`${location.pathname}${location.search}`),
-              }
-            );
+            usePageTabStore
+              .getState()
+              .openSpaceWorkspaceTab('workspace-profile');
+            navigate('/');
           });
           return;
         default: {
@@ -307,7 +307,6 @@ export function AppCommandProvider({ children }: { children: ReactNode }) {
       isSessionLayoutTab,
       isWorkspacePage,
       location.pathname,
-      location.search,
       navigate,
       openFilesTab,
       openPreviewTab,

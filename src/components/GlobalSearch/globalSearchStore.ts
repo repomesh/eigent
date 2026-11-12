@@ -12,22 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2025-2026 @ Eigent.ai All Rights Reserved. =========
 
-import { DsText } from '@/components/ui/ds-text';
-import { useTranslation } from 'react-i18next';
-import { useHomeGreetingText } from './HomeGreeting';
+import { create } from 'zustand';
 
-/** Home's New session greeting, above the composer. */
-export function HomeNewSessionGreeting() {
-  const { t } = useTranslation();
-  const greeting = useHomeGreetingText();
-  return (
-    <div data-home-new-session-greeting className="mb-ds-24 min-w-0">
-      <DsText as="h1" role="section" weight="semibold">
-        {greeting}
-      </DsText>
-      <DsText as="p" role="base" className="mt-ds-4 text-ds-ink-muted-default">
-        {t('layout.home-new-session-description')}
-      </DsText>
-    </div>
-  );
+interface GlobalSearchState {
+  open: boolean;
+  setOpen: (open: boolean) => void;
 }
+
+/** The top bar's button and ⌘K open the same dialog. */
+export const useGlobalSearchStore = create<GlobalSearchState>((set) => ({
+  open: false,
+  setOpen: (open) => set({ open }),
+}));

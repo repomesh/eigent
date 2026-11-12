@@ -77,6 +77,8 @@ export interface Space {
     legacy?: boolean;
     sharedMemoryEnabled?: boolean;
     preferredWorkdirMode?: 'worktree' | 'copy' | 'direct-write';
+    /** Chosen emoji; `null` or absent shows the name's first letter. */
+    emoji?: string | null;
     [key: string]: unknown;
   };
 }
@@ -195,6 +197,8 @@ interface SpaceStore {
     rootPath: string,
     force?: boolean
   ) => Promise<void>;
+  /** Sets the Space's emoji, or `null` for its first letter. */
+  setSpaceEmoji: (spaceId: string, emoji: string | null) => Promise<void>;
   /** Refuses with `full` once `MAX_PINNED_SPACES` are pinned. */
   pinSpace: (spaceId: string) => PinSpaceResult;
   unpinSpace: (spaceId: string) => void;
@@ -331,6 +335,28 @@ export const getPinnedSpaceIds = (
     if (ids.length === MAX_PINNED_SPACES) break;
   }
   return ids;
+};
+
+/**
+ * Write a new order for the pins on show, leaving a pin whose Space is briefly
+ * missing where it was, so it's still there when that Space comes back.
+ */
+const withHiddenPins = (
+  saved: readonly string[],
+  shown: readonly string[],
+  next: readonly string[]
+): string[] => {
+  const queue = [...next];
+  const result: string[] = [];
+  for (const spaceId of new Set(saved)) {
+    if (shown.includes(spaceId)) {
+      const replacement = queue.shift();
+      if (replacement !== undefined) result.push(replacement);
+    } else if (!next.includes(spaceId)) {
+      result.push(spaceId);
+    }
+  }
+  return [...result, ...queue];
 };
 
 const withoutPinnedSpaces = (
@@ -1171,6 +1197,7 @@ export const useSpaceStore = create<SpaceStore>()(
           return;
         }
 
+        const syncStartedAt = Date.now();
         const context = {
           accountKey,
           spaceIds: new Set([spaceId]),
@@ -1247,8 +1274,22 @@ export const useSpaceStore = create<SpaceStore>()(
             const activeNamedProjects = namedProjects.filter(
               (project) => project.status !== 'archived'
             );
+            // The reply can't know a Session created while it was on its way.
+            const serverProjectIds = new Set(
+              namedProjects.map((project) => project.id)
+            );
+            const createdDuringSync = Object.values(
+              get().projectsBySpaceId[targetSpaceId] ?? {}
+            ).filter(
+              (meta) =>
+                meta.createdAt >= syncStartedAt &&
+                !serverProjectIds.has(meta.id)
+            );
             get().upsertProjectMetas(
-              activeNamedProjects.map(projectMetaFromServer),
+              [
+                ...activeNamedProjects.map(projectMetaFromServer),
+                ...createdDuringSync,
+              ],
               {
                 syncedSpaceId: targetSpaceId,
                 replaceSpace: true,
@@ -1756,6 +1797,26 @@ export const useSpaceStore = create<SpaceStore>()(
           };
         }),
 
+      setSpaceEmoji: async (spaceId, emoji) => {
+        const space = get().spaces[spaceId];
+        if (!space) return;
+        const previous = space.metadata;
+        const metadata = { ...previous, emoji };
+        get().updateSpace(spaceId, { metadata });
+        // A signed-out local Space lives only on this device.
+        if (space.metadata?.legacy === true) return;
+        try {
+          await get().updateSpaceOnServer(spaceId, { metadata });
+        } catch (error) {
+          // `updateSpace` merges metadata, so name the emoji key explicitly:
+          // a Space that had none would otherwise keep the new one.
+          get().updateSpace(spaceId, {
+            metadata: { emoji: previous?.emoji ?? null },
+          });
+          throw error;
+        }
+      },
+
       renameSpaceOnServer: async (spaceId, name) => {
         const nextName = name.trim();
         if (!nextName) return;
@@ -1962,7 +2023,11 @@ export const useSpaceStore = create<SpaceStore>()(
         set({
           pinnedSpaceIdsByUser: {
             ...state.pinnedSpaceIdsByUser,
-            [ownerKey]: [...pinned, spaceId],
+            [ownerKey]: withHiddenPins(
+              state.pinnedSpaceIdsByUser[ownerKey] ?? [],
+              pinned,
+              [...pinned, spaceId]
+            ),
           },
         });
         return 'pinned';
@@ -1995,7 +2060,11 @@ export const useSpaceStore = create<SpaceStore>()(
           return {
             pinnedSpaceIdsByUser: {
               ...state.pinnedSpaceIdsByUser,
-              [ownerKey]: next,
+              [ownerKey]: withHiddenPins(
+                state.pinnedSpaceIdsByUser[ownerKey] ?? [],
+                pinned,
+                next
+              ),
             },
           };
         }),
@@ -2006,12 +2075,16 @@ export const useSpaceStore = create<SpaceStore>()(
           return {
             pinnedSpaceIdsByUser: {
               ...state.pinnedSpaceIdsByUser,
-              [ownerKey]: getPinnedSpaceIds(
-                {
-                  spaces: state.spaces,
-                  pinnedSpaceIdsByUser: { [ownerKey]: spaceIds },
-                },
-                ownerKey
+              [ownerKey]: withHiddenPins(
+                state.pinnedSpaceIdsByUser[ownerKey] ?? [],
+                getPinnedSpaceIds(state, ownerKey),
+                getPinnedSpaceIds(
+                  {
+                    spaces: state.spaces,
+                    pinnedSpaceIdsByUser: { [ownerKey]: spaceIds },
+                  },
+                  ownerKey
+                )
               ),
             },
           };
