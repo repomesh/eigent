@@ -15,7 +15,10 @@
 import tokenDarkIcon from '@/assets/custom/token-dark.svg';
 import tokenLightIcon from '@/assets/custom/token-light.svg';
 import { AnimatedTokenNumber } from '@/components/ChatBox/MessageItem/TokenUtils';
-import { CONTENT_HEADER_CLASS } from '@/components/Layout/ContentHeader';
+import {
+  CONTENT_HEADER_CLASS,
+  CONTENT_HEADER_TOP_BAR_ALIGNED_INSET_CLASS,
+} from '@/components/Layout/ContentHeader';
 import { SpaceGlyph } from '@/components/SpaceSidebar/SpaceGlyph';
 import { TriggerDialog } from '@/components/Trigger/TriggerDialog';
 import { Button } from '@/components/ui/button';
@@ -94,6 +97,11 @@ export interface HeaderBoxProps {
   projectAchieved?: boolean;
   /** Optional extra class names for the outer container */
   className?: string;
+  /**
+   * The header ends at the window edge, under the top bar's Support button.
+   * Beside an open preview it does not, and the Session sets its own inset.
+   */
+  atWindowEdge?: boolean;
   /** Show the chat timeline style control (hidden before a Session starts). */
   showTimelineStyle?: boolean;
   /** Summary column toggle, shown beside Preview when provided. */
@@ -108,6 +116,7 @@ export function HeaderBox({
   projectId,
   projectAchieved = false,
   className,
+  atWindowEdge = true,
   showTimelineStyle = true,
   summary,
   trailingActions,
@@ -254,7 +263,20 @@ export function HeaderBox({
   return (
     <div
       ref={headerRef}
-      className={cn(CONTENT_HEADER_CLASS, 'justify-between', className)}
+      data-session-header
+      className={cn(
+        CONTENT_HEADER_CLASS,
+        'justify-between',
+        // Lined up with the top bar's search icon, 18px in (the search
+        // button's 8px margin and 10px padding). A leading Space icon starts
+        // there; without one, the title leads, and its own 10px text inset
+        // puts it there from the base 8px.
+        sessionSpace && CONTENT_HEADER_TOP_BAR_ALIGNED_INSET_CLASS,
+        // At the window edge, the last 28px button centres under Support,
+        // 10px in from the edge.
+        atWindowEdge && 'pr-ds-10',
+        className
+      )}
     >
       {/* Left: Session identity and its controls. */}
       <div className="flex min-w-0 items-center gap-ds-4">
